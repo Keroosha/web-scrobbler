@@ -216,18 +216,21 @@ export class Controller {
 			throw new Error('No valid song is now playing');
 		}
 
-		await ScrobbleManager.toggleLove(this.currentSong.getInfo(), loveStatus);
+		await ScrobbleManager.toggleLove(
+			this.currentSong.getInfo(),
+			loveStatus
+		);
 
 		this.currentSong.setLoveStatus(loveStatus, { force: true });
 		this.onSongUpdated();
 	}
 
 	/**
-	 * React on state change.
+	 * Process connector state change.
 	 *
-	 * @param newState State of connector
+	 * @param state Connector state
 	 */
-	async onStateChanged(newState: ParsedSongInfo): Promise<void> {
+	async processStateChange(state: ParsedSongInfo): Promise<void> {
 		if (!this.isEnabled) {
 			return;
 		}
@@ -236,18 +239,20 @@ export class Controller {
 		 * Empty state has same semantics as reset; even if isPlaying,
 		 * we don't have enough data to use.
 		 */
-		if (isStateEmpty(newState)) {
+		if (isStateEmpty(state)) {
 			if (this.currentSong) {
 				this.debugLog('Received empty state - resetting');
 
-				await this.addUnknownSongToStorage();
+				if (this.isNeedToAddSongToScrobbleStorage()) {
+					await this.addSongToScrobbleStorage();
+				}
 				this.reset();
 			}
 
-			if (newState.isPlaying) {
+			if (state.isPlaying) {
 				this.debugLog(
 					`State from connector doesn't contain enough information about the playing track: ${toString(
-						newState
+						state
 					)}`,
 					'warn'
 				);
@@ -256,16 +261,20 @@ export class Controller {
 			return;
 		}
 
-		const isSongChanged = this.isSongChanged(newState);
+		const isSongChanged = this.isSongChanged(state);
 
 		if (isSongChanged || this.isReplayingSong) {
-			if (newState.isPlaying) {
-				this.processNewState(newState);
+			if (state.isPlaying) {
+				if (this.isNeedToAddSongToScrobbleStorage()) {
+					await this.addSongToScrobbleStorage();
+				}
+
+				this.processNewState(state);
 			} else {
 				this.reset();
 			}
 		} else {
-			this.processCurrentState(newState);
+			this.processCurrentState(state);
 		}
 	}
 
@@ -281,22 +290,20 @@ export class Controller {
 	/**
 	 * Process connector state as new one.
 	 *
-	 * @param newState Connector state
+	 * @param state Connector state
 	 */
-	private async processNewState(newState: ParsedSongInfo): Promise<void> {
-		await this.addUnknownSongToStorage();
-
+	private processNewState(state: ParsedSongInfo): Promise<void> {
 		/*
 		 * We've hit a new song (or replaying the previous one)
 		 * clear any previous song and its bindings.
 		 */
 		this.resetState();
-		this.currentSong = new Song(newState);
+		this.currentSong = new Song(state);
 		this.currentSong.flags.isReplaying = this.isReplayingSong;
 
-		this.debugLog(`New song detected: ${toString(newState)}`);
+		this.debugLog(`New song detected: ${toString(state)}`);
 
-		if (!this.shouldScrobblePodcasts && newState.isPodcast) {
+		if (!this.shouldScrobblePodcasts && state.isPodcast) {
 			this.skipCurrentSong();
 			return;
 		}
@@ -321,7 +328,7 @@ export class Controller {
 		 * isPlaying flag binding only calls pause/resume which assumes
 		 * the timer is started.
 		 */
-		if (!newState.isPlaying) {
+		if (!state.isPlaying) {
 			this.playbackTimer.pause();
 			this.replayDetectionTimer.pause();
 		}
@@ -492,26 +499,20 @@ export class Controller {
 	}
 
 	/**
-	 * Add current song to scrobble storage if it's needed.
-	 */
-	private async addUnknownSongToStorage(): Promise<void> {
-		if (this.isNeedToAddSongToScrobbleStorage()) {
-			const boundScrobblerIds = ScrobbleManager.getBoundScrobblers().map(
-				(scrobbler) => scrobbler.getId()
-			);
-
-			await this.addSongToScrobbleStorage(boundScrobblerIds);
-		}
-	}
-
-	/**
 	 * Add current song to scrobble storage.
 	 *
 	 * @param scrobblerIds Array of scrobbler IDs
 	 */
 	private async addSongToScrobbleStorage(
-		scrobblerIds: string[]
+		scrobblerIds?: string[]
 	): Promise<void> {
+		if (!scrobblerIds) {
+			// eslint-disable-next-line no-param-reassign
+			scrobblerIds = ScrobbleManager.getBoundScrobblers().map(
+				(scrobbler) => scrobbler.getId()
+			);
+		}
+
 		await ScrobbleStorage.addSong(this.currentSong.getInfo(), scrobblerIds);
 	}
 

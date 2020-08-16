@@ -156,7 +156,7 @@ export abstract class TabWorker {
 			case Event.StateChanged: {
 				const ctrl = this.tabControllers[tabId];
 				if (ctrl) {
-					ctrl.onStateChanged(data as ParsedSongInfo);
+					ctrl.processStateChange(data as ParsedSongInfo);
 				}
 				break;
 			}
