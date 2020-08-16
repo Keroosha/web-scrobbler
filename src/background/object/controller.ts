@@ -43,7 +43,6 @@ export enum ControllerEvent {
 export class Controller {
 	mode: ControllerMode;
 	tabId: number;
-	isEnabled: boolean;
 	connector: ConnectorEntry;
 
 	pipeline: Pipeline;
@@ -52,6 +51,7 @@ export class Controller {
 	replayDetectionTimer: Timer;
 
 	isReplayingSong = false;
+	isControllerEnabled: boolean;
 	shouldScrobblePodcasts: boolean;
 
 	/**
@@ -63,7 +63,7 @@ export class Controller {
 	constructor(tabId: number, connector: ConnectorEntry, isEnabled: boolean) {
 		this.tabId = tabId;
 		this.connector = connector;
-		this.isEnabled = isEnabled;
+		this.isControllerEnabled = isEnabled;
 		this.mode = isEnabled ? ControllerMode.Base : ControllerMode.Disabled;
 
 		this.pipeline = new Pipeline();
@@ -110,7 +110,7 @@ export class Controller {
 	 * @param flag True means enabled and vice versa
 	 */
 	setEnabled(flag: boolean): void {
-		this.isEnabled = flag;
+		this.isControllerEnabled = flag;
 
 		if (flag) {
 			this.setMode(ControllerMode.Base);
@@ -118,6 +118,15 @@ export class Controller {
 			this.resetState();
 			this.setMode(ControllerMode.Disabled);
 		}
+	}
+
+	/**
+	 * Check if the controller is enabled.
+	 *
+	 * @return Check result
+	 */
+	isEnabled(): boolean {
+		return this.isControllerEnabled;
 	}
 
 	/**
@@ -187,6 +196,15 @@ export class Controller {
 	}
 
 	/**
+	 * Return a tab ID where the controller is attached.
+	 *
+	 * @return Tab ID
+	 */
+	getTabId(): number {
+		return this.tabId;
+	}
+
+	/**
 	 * Sets data for current song from user input.
 	 *
 	 * @param data Object contains song data
@@ -231,32 +249,12 @@ export class Controller {
 	 * @param state Connector state
 	 */
 	async processStateChange(state: ParsedSongInfo): Promise<void> {
-		if (!this.isEnabled) {
+		if (!this.isControllerEnabled) {
 			return;
 		}
 
-		/*
-		 * Empty state has same semantics as reset; even if isPlaying,
-		 * we don't have enough data to use.
-		 */
 		if (isStateEmpty(state)) {
-			if (this.currentSong) {
-				this.debugLog('Received empty state - resetting');
-
-				if (this.isNeedToAddSongToScrobbleStorage()) {
-					await this.addSongToScrobbleStorage();
-				}
-				this.reset();
-			}
-
-			if (state.isPlaying) {
-				this.debugLog(
-					`State from connector doesn't contain enough information about the playing track: ${toString(
-						state
-					)}`,
-					'warn'
-				);
-			}
+			await this.processEmptyState(state);
 
 			return;
 		}
@@ -278,13 +276,29 @@ export class Controller {
 		}
 	}
 
-	private setMode(mode: ControllerMode): void {
-		this.mode = mode;
-		this.onModeChanged();
-	}
+	private async processEmptyState(state: ParsedSongInfo): Promise<void> {
+		if (this.currentSong) {
+			/*
+			 * Empty state has same semantics as reset; even if isPlaying,
+			 * we don't have enough data to use.
+			 */
 
-	private dispatchEvent(event: ControllerEvent): void {
-		this.onControllerEvent(event);
+			this.debugLog('Received empty state - resetting');
+
+			if (this.isNeedToAddSongToScrobbleStorage()) {
+				await this.addSongToScrobbleStorage();
+			}
+			this.reset();
+		}
+
+		if (state.isPlaying) {
+			this.debugLog(
+				`State from connector doesn't contain enough information about the playing track: ${toString(
+					state
+				)}`,
+				'warn'
+			);
+		}
 	}
 
 	/**
@@ -292,7 +306,7 @@ export class Controller {
 	 *
 	 * @param state Connector state
 	 */
-	private processNewState(state: ParsedSongInfo): Promise<void> {
+	private processNewState(state: ParsedSongInfo): void {
 		/*
 		 * We've hit a new song (or replaying the previous one)
 		 * clear any previous song and its bindings.
@@ -303,10 +317,10 @@ export class Controller {
 
 		this.debugLog(`New song detected: ${toString(state)}`);
 
-		if (!this.shouldScrobblePodcasts && state.isPodcast) {
-			this.skipCurrentSong();
-			return;
-		}
+		// if (!this.shouldScrobblePodcasts && state.isPodcast) {
+		// 	this.skipCurrentSong();
+		// 	return;
+		// }
 
 		/*
 		 * Start the timer, actual time will be set after processing
@@ -314,7 +328,7 @@ export class Controller {
 		 * will be allowed to trigger only after the song is validated.
 		 */
 		this.playbackTimer.start(() => {
-			this.scrobbleSong();
+			this.onPlaybackTimerExpired();
 		});
 
 		this.replayDetectionTimer.start(() => {
@@ -575,6 +589,16 @@ export class Controller {
 		}
 	}
 
+	private onPlaybackTimerExpired(): void {
+		this.currentSong.flags.isReadyToScrobble = true;
+
+		if (this.currentSong.flags.isSkipped) {
+			return;
+		}
+
+		this.scrobbleSong();
+	}
+
 	/**
 	 * Contains all actions to be done when song is ready to be marked as
 	 * now playing.
@@ -641,6 +665,15 @@ export class Controller {
 	private getSecondsToScrobble(duration: number): number {
 		const percent = getOption<number>(SCROBBLE_PERCENT);
 		return getSecondsToScrobble(duration, percent);
+	}
+
+	private setMode(mode: ControllerMode): void {
+		this.mode = mode;
+		this.onModeChanged();
+	}
+
+	private dispatchEvent(event: ControllerEvent): void {
+		this.onControllerEvent(event);
 	}
 
 	private reset(): void {
