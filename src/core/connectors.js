@@ -1588,6 +1588,7 @@ const connectors = [{
 	label: 'Winampify',
 	js: 'connectors/winampify.js',
 	matches: [
+		'*://localhost:8888/*',
 		'*://winampify.io/*',
 	],
 }];
