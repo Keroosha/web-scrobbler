@@ -2209,6 +2209,13 @@ const connectors = [{
 	],
 	js: 'connectors/cpr.js',
 	id: 'cpr',
+}, {
+	label: 'TgFM',
+	matches: [
+		'*://tgfm.app/*'
+	],
+	js: 'connectors/tgfm.js',
+	id: 'tgfm'
 }];
 
 define(() => connectors);
